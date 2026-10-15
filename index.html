@@ -4,43 +4,75 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-    <title>TaskFlow | Task Manager</title>
+    <meta name="theme-color" content="#635bff">
+    <title>TaskFlow | Smart Task Manager</title>
 
     <link rel="stylesheet" href="css/style.css">
     <script src="js/script.js" defer></script>
 </head>
 <body>
-
     <header class="navbar">
         <a href="#" class="logo">TaskFlow<span>.</span></a>
-        <span class="nav-label">PERSONAL WORKSPACE</span>
+
+        <div class="nav-actions">
+            <span class="workspace-label">MY WORKSPACE</span>
+            <button id="themeToggle" class="icon-btn"
+                    aria-label="Switch theme" title="Switch theme">
+                🌙
+            </button>
+        </div>
     </header>
 
     <main class="container">
-
         <section class="welcome">
             <p class="eyebrow">YOUR PRODUCTIVITY SPACE</p>
-            <h1>Get things done.</h1>
-            <p class="subtitle">
-                Organize your day, one task at a time.
-            </p>
+            <h1>Make today count.</h1>
+            <p class="subtitle">Plan smarter. Focus better. Get things done.</p>
         </section>
 
         <section class="stats">
-            <div class="stat-card">
+            <article class="stat-card">
                 <span>Total tasks</span>
                 <h2 id="totalCount">0</h2>
-            </div>
+                <small>All your tasks</small>
+            </article>
 
-            <div class="stat-card">
+            <article class="stat-card">
                 <span>Completed</span>
                 <h2 id="completedCount">0</h2>
-            </div>
+                <small>Tasks finished</small>
+            </article>
 
-            <div class="stat-card">
+            <article class="stat-card">
                 <span>Remaining</span>
                 <h2 id="remainingCount">0</h2>
+                <small>Still to do</small>
+            </article>
+
+            <article class="stat-card">
+                <span>Overdue</span>
+                <h2 id="overdueCount">0</h2>
+                <small>Past their deadline</small>
+            </article>
+        </section>
+
+        <section class="progress-card">
+            <div class="progress-heading">
+                <div>
+                    <h2>Daily progress</h2>
+                    <p>Every completed task counts.</p>
+                </div>
+                <strong id="progressPercent">0%</strong>
+            </div>
+
+            <div class="progress-track"
+                 role="progressbar"
+                 aria-label="Task completion progress"
+                 aria-valuemin="0"
+                 aria-valuemax="100"
+                 aria-valuenow="0"
+                 id="progressTrack">
+                <div id="progressBar" class="progress-bar"></div>
             </div>
         </section>
 
@@ -48,41 +80,82 @@
             <div class="panel-heading">
                 <div>
                     <h2>My tasks</h2>
-                    <p>Keep track of what matters.</p>
+                    <p>Organize your work in one place.</p>
                 </div>
+
+                <button id="completeAll" class="secondary-btn">
+                    Complete all
+                </button>
             </div>
 
             <form id="taskForm" class="task-form">
-                <input
-                    type="text"
-                    id="taskInput"
-                    placeholder="What needs to be done?"
-                    maxlength="150"
-                    autocomplete="off"
-                    required
-                >
-                <button type="submit" class="add-btn">
-                    + Add task
-                </button>
+                <div class="field full-width">
+                    <label for="taskInput">Task name</label>
+                    <input id="taskInput" type="text"
+                           placeholder="e.g. Finish project report"
+                           maxlength="150" required>
+                </div>
+
+                <div class="field">
+                    <label for="priorityInput">Priority</label>
+                    <select id="priorityInput">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </div>
+
+                <div class="field">
+                    <label for="dueDateInput">Due date</label>
+                    <input id="dueDateInput" type="date">
+                </div>
+
+                <div class="form-actions">
+                    <button type="submit" id="submitBtn" class="add-btn">
+                        + Add task
+                    </button>
+                    <button type="button" id="cancelEdit"
+                            class="secondary-btn" hidden>
+                        Cancel
+                    </button>
+                </div>
             </form>
 
+            <div class="toolbar">
+                <div class="search-box">
+                    <span aria-hidden="true">⌕</span>
+                    <input id="searchInput" type="search"
+                           placeholder="Search tasks..."
+                           aria-label="Search tasks">
+                </div>
+
+                <select id="sortSelect" aria-label="Sort tasks">
+                    <option value="newest">Newest first</option>
+                    <option value="oldest">Oldest first</option>
+                    <option value="priority">Highest priority</option>
+                    <option value="dueDate">Due date</option>
+                    <option value="alphabetical">Alphabetical</option>
+                </select>
+            </div>
+
             <div class="filters" aria-label="Filter tasks">
-                <button class="filter active" data-filter="all">
-                    All
-                </button>
-                <button class="filter" data-filter="active">
-                    Active
-                </button>
-                <button class="filter" data-filter="completed">
-                    Completed
-                </button>
+                <button class="filter active" data-filter="all"
+                        aria-pressed="true">All</button>
+                <button class="filter" data-filter="active"
+                        aria-pressed="false">Active</button>
+                <button class="filter" data-filter="completed"
+                        aria-pressed="false">Completed</button>
+                <button class="filter" data-filter="overdue"
+                        aria-pressed="false">Overdue</button>
             </div>
 
             <ul id="taskList" class="task-list"></ul>
 
-            <p id="emptyMessage" class="empty-message">
-                No tasks here yet. Add one to get started!
-            </p>
+            <div id="emptyMessage" class="empty-message">
+                <div class="empty-icon">✦</div>
+                <h3>No tasks found</h3>
+                <p>Add a task or change your search and filters.</p>
+            </div>
 
             <div class="panel-footer">
                 <span id="footerCount">0 tasks remaining</span>
@@ -93,10 +166,8 @@
         </section>
 
         <footer>
-            Built for a more productive day.
+            TaskFlow · Built for a more productive day.
         </footer>
-
     </main>
-
 </body>
 </html>
