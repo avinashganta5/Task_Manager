@@ -18,15 +18,25 @@
     </script>
 
     <header class="navbar">
-        <a href="#" class="logo">TaskFlow<span>.</span></a>
+        <a href="#" class="logo" id="homeLink">TaskFlow<span>.</span></a>
+
+        <nav class="nav-tabs" id="navTabs" aria-label="Views">
+            <button class="nav-tab active" data-view="tasks">Tasks</button>
+            <button class="nav-tab" data-view="archive">Archive</button>
+            <button class="nav-tab" data-view="trash">Trash</button>
+        </nav>
+
         <div class="nav-actions">
-            <span class="workspace-label">MY WORKSPACE</span>
+            <button id="focusBtn" class="icon-btn" title="Focus mode (F)"
+                    aria-label="Enter focus mode">◎</button>
+            <button id="helpBtn" class="icon-btn" title="Shortcuts (?)"
+                    aria-label="Show shortcuts">?</button>
             <button id="themeToggle" class="icon-btn"
                     aria-label="Switch theme" title="Switch theme">🌙</button>
         </div>
     </header>
 
-    <main class="container">
+    <main class="container" id="mainContainer">
         <section class="welcome">
             <p class="eyebrow">YOUR PRODUCTIVITY SPACE</p>
             <h1>Make today count.</h1>
@@ -35,7 +45,7 @@
 
         <section class="stats">
             <article class="stat-card">
-                <span>Total tasks</span>
+                <span>Total</span>
                 <h2 id="totalCount">0</h2>
                 <small>All your tasks</small>
             </article>
@@ -60,7 +70,7 @@
             <div class="progress-heading">
                 <div>
                     <h2>Daily progress</h2>
-                    <p>Every completed task counts.</p>
+                    <p id="focusTimeLabel">Focus time today: 0m</p>
                 </div>
                 <strong id="progressPercent">0%</strong>
             </div>
@@ -73,152 +83,217 @@
             </div>
         </section>
 
-        <section class="task-panel">
+        <!-- Saved views tabs -->
+        <section class="views-bar" id="viewsBar">
+            <div class="views-list" id="viewsList"></div>
+            <button id="saveViewBtn" class="secondary-btn" title="Save current view">
+                + Save view
+            </button>
+        </section>
+
+        <section class="task-panel" id="taskPanel">
             <div class="panel-heading">
                 <div>
-                    <h2>My tasks</h2>
-                    <p>Organize your work in one place.</p>
+                    <h2 id="panelTitle">My tasks</h2>
+                    <p id="panelSubtitle">Organize your work in one place.</p>
                 </div>
-
                 <div class="heading-actions">
-                    <button id="completeAll" class="secondary-btn">
-                        Complete all
-                    </button>
-
+                    <button id="completeAll" class="secondary-btn">Complete all</button>
                     <details class="menu" id="moreMenu">
                         <summary class="icon-btn" aria-label="More actions"
                                  title="More actions">⋯</summary>
                         <div class="menu-panel" role="menu">
-                            <button id="exportBtn" role="menuitem">
-                                Export as JSON
-                            </button>
-                            <button id="importBtn" role="menuitem">
-                                Import from JSON…
-                            </button>
+                            <button id="templatesBtn" role="menuitem">Templates…</button>
+                            <button id="exportBtn" role="menuitem">Export as JSON</button>
+                            <button id="importBtn" role="menuitem">Import from JSON…</button>
+                            <button id="backupBtn" role="menuitem">Enable daily backup…</button>
                             <hr>
-                            <button id="clearAllBtn" role="menuitem"
-                                    class="danger">Clear all tasks…</button>
+                            <button id="emptyTrashBtn" role="menuitem"
+                                    class="danger" hidden>Empty trash…</button>
+                            <button id="clearAllBtn" role="menuitem" class="danger">Clear all tasks…</button>
                         </div>
                     </details>
                 </div>
             </div>
 
-            <form id="taskForm" class="task-form">
-                <div class="field full-width">
-                    <label for="taskInput">Task name</label>
-                    <input id="taskInput" type="text"
-                           placeholder="e.g. Finish project report"
-                           maxlength="150" required>
+            <!-- Tasks view: main form + list -->
+            <div id="tasksView">
+                <form id="taskForm" class="task-form" autocomplete="off">
+                    <div class="field full-width">
+                        <label for="taskInput">Task name</label>
+                        <input id="taskInput" type="text"
+                               placeholder="e.g. Finish project report"
+                               maxlength="150" required>
+                    </div>
+                    <div class="field">
+                        <label for="priorityInput">Priority</label>
+                        <select id="priorityInput">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="startDateInput">Start date</label>
+                        <input id="startDateInput" type="date">
+                    </div>
+                    <div class="field">
+                        <label for="dueDateInput">Due date</label>
+                        <input id="dueDateInput" type="date">
+                    </div>
+                    <div class="field">
+                        <label for="tagsInput">Tags</label>
+                        <input id="tagsInput" type="text"
+                               placeholder="home, errand" maxlength="120">
+                    </div>
+                    <div class="field">
+                        <label for="recurrenceInput">Repeat</label>
+                        <select id="recurrenceInput">
+                            <option value="none" selected>Never</option>
+                            <option value="daily">Daily</option>
+                            <option value="weekly">Weekly</option>
+                            <option value="monthly">Monthly</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="estimateInput">Estimate (min)</label>
+                        <input id="estimateInput" type="number" min="0" max="1440"
+                               step="5" placeholder="e.g. 30">
+                    </div>
+                    <div class="field">
+                        <label for="waitingInput">Waiting on</label>
+                        <input id="waitingInput" type="text"
+                               placeholder="Person or thing" maxlength="80">
+                    </div>
+
+                    <details class="advanced">
+                        <summary>Advanced</summary>
+                        <div class="advanced-grid">
+                            <div class="field full-width">
+                                <label for="linksInput">Links (one per line)</label>
+                                <textarea id="linksInput" rows="2"
+                                          placeholder="https://…"></textarea>
+                            </div>
+                            <div class="field full-width">
+                                <label for="customFieldsInput">Custom fields
+                                    (key: value, one per line)</label>
+                                <textarea id="customFieldsInput" rows="2"
+                                          placeholder="Client: Acme&#10;Ticket: #1234"></textarea>
+                            </div>
+                        </div>
+                    </details>
+
+                    <div class="form-actions">
+                        <button type="submit" id="submitBtn" class="add-btn">
+                            + Add task
+                        </button>
+                        <button type="button" id="cancelEdit"
+                                class="secondary-btn" hidden>Cancel</button>
+                        <button type="button" id="saveTemplateBtn"
+                                class="secondary-btn">Save as template</button>
+                    </div>
+                </form>
+
+                <div id="bulkBar" class="bulk-bar" hidden>
+                    <span><strong id="bulkCount">0</strong> selected</span>
+                    <div class="bulk-actions">
+                        <button type="button" id="bulkComplete">Complete</button>
+                        <button type="button" id="bulkUncomplete">Uncomplete</button>
+                        <button type="button" id="bulkPin">Pin</button>
+                        <button type="button" id="bulkArchive">Archive</button>
+                        <select id="bulkPriority" aria-label="Set priority">
+                            <option value="">Set priority…</option>
+                            <option value="high">High</option>
+                            <option value="medium">Medium</option>
+                            <option value="low">Low</option>
+                        </select>
+                        <button type="button" id="bulkDelete" class="danger">Delete</button>
+                        <button type="button" id="bulkClear" class="ghost">Clear</button>
+                    </div>
                 </div>
 
-                <div class="field">
-                    <label for="priorityInput">Priority</label>
-                    <select id="priorityInput">
-                        <option value="low">Low</option>
-                        <option value="medium" selected>Medium</option>
-                        <option value="high">High</option>
+                <div class="toolbar">
+                    <div class="search-box">
+                        <span aria-hidden="true">⌕</span>
+                        <input id="searchInput" type="search"
+                               placeholder="Search tasks…  (⌘K)"
+                               aria-label="Search tasks">
+                    </div>
+                    <select id="sortSelect" aria-label="Sort tasks">
+                        <option value="manual">Manual order</option>
+                        <option value="newest">Newest first</option>
+                        <option value="oldest">Oldest first</option>
+                        <option value="priority">Highest priority</option>
+                        <option value="startDate">Start date</option>
+                        <option value="dueDate">Due date</option>
+                        <option value="alphabetical">Alphabetical</option>
                     </select>
                 </div>
 
-                <div class="field">
-                    <label for="dueDateInput">Due date</label>
-                    <input id="dueDateInput" type="date">
+                <div class="filters" aria-label="Filter tasks">
+                    <button class="filter active" data-filter="all">All</button>
+                    <button class="filter" data-filter="active">Active</button>
+                    <button class="filter" data-filter="completed">Completed</button>
+                    <button class="filter" data-filter="overdue">Overdue</button>
+                    <button class="filter" data-filter="today">Today</button>
+                    <button class="filter" data-filter="pinned">Pinned</button>
+                    <button class="filter" data-filter="waiting">Waiting</button>
                 </div>
 
-                <div class="field">
-                    <label for="tagsInput">Tags</label>
-                    <input id="tagsInput" type="text"
-                           placeholder="home, errand"
-                           maxlength="120" autocomplete="off">
-                </div>
+                <div id="tagFilters" class="tag-filters" hidden></div>
 
-                <div class="field">
-                    <label for="recurrenceInput">Repeat</label>
-                    <select id="recurrenceInput">
-                        <option value="none" selected>Never</option>
-                        <option value="daily">Daily</option>
-                        <option value="weekly">Weekly</option>
-                        <option value="monthly">Monthly</option>
-                    </select>
-                </div>
+                <ul id="taskList" class="task-list" tabindex="-1"></ul>
 
-                <div class="form-actions">
-                    <button type="submit" id="submitBtn" class="add-btn">
-                        + Add task
-                    </button>
-                    <button type="button" id="cancelEdit"
-                            class="secondary-btn" hidden>Cancel</button>
-                </div>
-            </form>
-
-            <div id="bulkBar" class="bulk-bar" hidden>
-                <span><strong id="bulkCount">0</strong> selected</span>
-                <div class="bulk-actions">
-                    <button type="button" id="bulkComplete">Complete</button>
-                    <button type="button" id="bulkUncomplete">Uncomplete</button>
-                    <select id="bulkPriority" aria-label="Set priority">
-                        <option value="">Set priority…</option>
-                        <option value="high">High</option>
-                        <option value="medium">Medium</option>
-                        <option value="low">Low</option>
-                    </select>
-                    <button type="button" id="bulkDelete" class="danger">Delete</button>
-                    <button type="button" id="bulkClear" class="ghost">Clear</button>
+                <div id="emptyMessage" class="empty-message">
+                    <div class="empty-icon">✦</div>
+                    <h3>No tasks found</h3>
+                    <p>Add a task or change your search and filters.</p>
                 </div>
             </div>
 
-            <div class="toolbar">
-                <div class="search-box">
-                    <span aria-hidden="true">⌕</span>
-                    <input id="searchInput" type="search"
-                           placeholder="Search tasks…  (⌘K)"
-                           aria-label="Search tasks">
+            <!-- Archive view -->
+            <div id="archiveView" hidden>
+                <p class="view-hint">Archived tasks are hidden from stats and the main list.</p>
+                <ul id="archiveList" class="task-list"></ul>
+                <div id="archiveEmpty" class="empty-message" hidden>
+                    <div class="empty-icon">▤</div>
+                    <h3>Archive is empty</h3>
+                    <p>Archive tasks to keep them out of the way without deleting them.</p>
                 </div>
-                <select id="sortSelect" aria-label="Sort tasks">
-                    <option value="manual">Manual order</option>
-                    <option value="newest">Newest first</option>
-                    <option value="oldest">Oldest first</option>
-                    <option value="priority">Highest priority</option>
-                    <option value="dueDate">Due date</option>
-                    <option value="alphabetical">Alphabetical</option>
-                </select>
             </div>
 
-            <div class="filters" aria-label="Filter tasks">
-                <button class="filter active" data-filter="all"
-                        aria-pressed="true">All</button>
-                <button class="filter" data-filter="active"
-                        aria-pressed="false">Active</button>
-                <button class="filter" data-filter="completed"
-                        aria-pressed="false">Completed</button>
-                <button class="filter" data-filter="overdue"
-                        aria-pressed="false">Overdue</button>
-            </div>
-
-            <div id="tagFilters" class="tag-filters" hidden></div>
-
-            <ul id="taskList" class="task-list" tabindex="-1"></ul>
-
-            <div id="emptyMessage" class="empty-message">
-                <div class="empty-icon">✦</div>
-                <h3>No tasks found</h3>
-                <p>Add a task or change your search and filters.</p>
+            <!-- Trash view -->
+            <div id="trashView" hidden>
+                <p class="view-hint">Deleted tasks are kept for 30 days, then purged automatically.</p>
+                <ul id="trashList" class="task-list"></ul>
+                <div id="trashEmpty" class="empty-message" hidden>
+                    <div class="empty-icon">♻</div>
+                    <h3>Trash is empty</h3>
+                    <p>Deleted tasks will appear here for 30 days.</p>
+                </div>
             </div>
 
             <div class="panel-footer">
                 <span id="footerCount">0 tasks remaining</span>
-                <button id="clearCompleted" class="clear-btn">
-                    Clear completed
-                </button>
+                <button id="clearCompleted" class="clear-btn">Clear completed</button>
             </div>
         </section>
 
         <footer>TaskFlow · Built for a more productive day.</footer>
     </main>
 
+    <!-- Floating quick add -->
+    <form id="quickAdd" class="quick-add" aria-label="Quick add task">
+        <span class="quick-add-icon" aria-hidden="true">＋</span>
+        <input id="quickAddInput" type="text" placeholder="Quick add — press Enter"
+               maxlength="150" autocomplete="off">
+    </form>
+
+    <!-- Toasts -->
     <div id="toastContainer" class="toast-container"
          aria-live="polite" aria-atomic="false"></div>
 
+    <!-- Import dialog -->
     <dialog id="importDialog" class="modal">
         <form method="dialog">
             <h3>Import tasks</h3>
@@ -237,8 +312,79 @@
             </div>
         </form>
     </dialog>
+    <input id="importFile" type="file" accept="application/json,.json" hidden>
 
-    <input id="importFile" type="file"
-           accept="application/json,.json" hidden>
+    <!-- Templates dialog -->
+    <dialog id="templatesDialog" class="modal wide">
+        <form method="dialog">
+            <h3>Task templates</h3>
+            <p>Quick-insert a saved set of form values.</p>
+            <ul id="templatesList" class="templates-list"></ul>
+            <div class="modal-actions">
+                <button value="close" class="secondary-btn">Close</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Cheatsheet dialog -->
+    <dialog id="helpDialog" class="modal">
+        <form method="dialog">
+            <h3>Keyboard shortcuts</h3>
+            <ul class="cheatsheet">
+                <li><kbd>⌘</kbd>+<kbd>K</kbd><span>Focus search</span></li>
+                <li><kbd>N</kbd><span>Focus task name</span></li>
+                <li><kbd>Q</kbd><span>Focus quick add</span></li>
+                <li><kbd>F</kbd><span>Toggle focus mode</span></li>
+                <li><kbd>?</kbd><span>Show this cheatsheet</span></li>
+                <li><kbd>⌘</kbd>+<kbd>Z</kbd><span>Undo last action</span></li>
+                <li><kbd>Esc</kbd><span>Cancel edit / clear search</span></li>
+                <li><kbd>J</kbd> / <kbd>K</kbd><span>Move between tasks</span></li>
+                <li><kbd>X</kbd><span>Complete focused task</span></li>
+                <li><kbd>E</kbd><span>Edit focused task</span></li>
+                <li><kbd>⌫</kbd><span>Delete focused task</span></li>
+            </ul>
+            <div class="modal-actions">
+                <button value="close" class="add-btn">Got it</button>
+            </div>
+        </form>
+    </dialog>
+
+    <!-- Focus mode overlay -->
+    <div id="focusOverlay" class="focus-overlay" hidden>
+        <button id="focusExit" class="focus-exit" aria-label="Exit focus mode">×</button>
+
+        <div class="focus-stage" id="focusStage">
+            <p class="eyebrow" id="focusEyebrow">FOCUS MODE</p>
+            <h2 class="focus-title" id="focusTitle">—</h2>
+
+            <div class="focus-meta" id="focusMeta"></div>
+
+            <div class="focus-ring" id="focusRing" hidden>
+                <svg viewBox="0 0 120 120" aria-hidden="true">
+                    <circle cx="60" cy="60" r="54" class="ring-track"/>
+                    <circle cx="60" cy="60" r="54" class="ring-progress"
+                            id="ringProgress"/>
+                </svg>
+                <div class="focus-time" id="focusTime">25:00</div>
+            </div>
+
+            <div class="focus-actions">
+                <button id="focusPomodoro" class="secondary-btn">Start 25m</button>
+                <button id="focusSkip" class="secondary-btn">Skip</button>
+                <button id="focusComplete" class="add-btn">Complete</button>
+            </div>
+        </div>
+
+        <div class="focus-empty" id="focusEmpty" hidden>
+            <h2>All clear ✨</h2>
+            <p>No actionable tasks. Enjoy the moment.</p>
+        </div>
+    </div>
+
+    <!-- Undo stack hint -->
+    <div id="undoHint" class="undo-hint" hidden>
+        <span>Undo available</span>
+        <button id="undoBtn" class="toast-action">Undo (⌘Z)</button>
+    </div>
 </body>
 </html>
