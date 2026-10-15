@@ -13,6 +13,11 @@
     --success: #15976b;
     --danger: #dc5360;
     --shadow: 0 8px 30px rgba(30, 35, 70, 0.04);
+    --toast-bg: #202235;
+    --toast-text: #ffffff;
+    --toast-action: #a29cff;
+    --radius: 15px;
+    --radius-sm: 8px;
 }
 
 body.dark {
@@ -26,6 +31,9 @@ body.dark {
     --success: #55d6a3;
     --danger: #ff7d89;
     --shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+    --toast-bg: #2a2d3f;
+    --toast-text: #f0f1fa;
+    --toast-action: #a29cff;
 }
 
 * {
@@ -35,7 +43,7 @@ body.dark {
 }
 
 body {
-    font-family: Inter, Arial, sans-serif;
+    font-family: Inter, system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
     background: var(--background);
     color: var(--text);
     min-height: 100vh;
@@ -106,6 +114,15 @@ select:focus-visible {
     background: var(--surface);
     border-radius: 10px;
     font-size: 18px;
+    transition: background 0.15s, transform 0.15s;
+}
+
+.icon-btn:hover {
+    background: var(--soft);
+}
+
+.icon-btn:active {
+    transform: scale(0.95);
 }
 
 /* ---------- Main content ---------- */
@@ -152,7 +169,7 @@ select:focus-visible {
 .task-panel {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 15px;
+    border-radius: var(--radius);
     box-shadow: var(--shadow);
 }
 
@@ -168,6 +185,8 @@ select:focus-visible {
 .stat-card h2 {
     font-size: 30px;
     margin: 13px 0 8px;
+    display: inline-block;
+    transform-origin: left center;
 }
 
 .stat-card small {
@@ -175,16 +194,19 @@ select:focus-visible {
     font-size: 11px;
 }
 
-#completedCount {
-    color: var(--success);
+#completedCount { color: var(--success); }
+#remainingCount { color: var(--primary); }
+#overdueCount   { color: var(--danger); }
+
+/* Value-change pulse */
+.pulse {
+    animation: pulse 0.4s ease;
 }
 
-#remainingCount {
-    color: var(--primary);
-}
-
-#overdueCount {
-    color: var(--danger);
+@keyframes pulse {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.14); }
+    100% { transform: scale(1); }
 }
 
 /* ---------- Progress ---------- */
@@ -224,7 +246,7 @@ select:focus-visible {
     width: 0;
     background: linear-gradient(90deg, #827aff, var(--primary));
     border-radius: inherit;
-    transition: width 0.3s ease;
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 /* ---------- Task panel ---------- */
@@ -250,12 +272,13 @@ select:focus-visible {
     background: var(--surface);
     color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     padding: 11px 14px;
     font-size: 12px;
+    transition: background 0.15s;
 }
 
-.secondary-btn:hover {
+.secondary-btn:not(:disabled):hover {
     background: var(--soft);
 }
 
@@ -292,15 +315,17 @@ select:focus-visible {
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text);
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     padding: 0 12px;
     font-size: 13px;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .field input:focus,
 .field select:focus,
 .toolbar select:focus {
     border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.12);
 }
 
 .form-actions {
@@ -313,15 +338,19 @@ select:focus-visible {
     background: var(--primary);
     color: white;
     border: none;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     padding: 13px 20px;
     font-size: 13px;
     font-weight: 700;
-    transition: background 0.2s;
+    transition: background 0.15s, transform 0.1s;
 }
 
-.add-btn:hover {
+.add-btn:not(:disabled):hover {
     background: var(--primary-hover);
+}
+
+.add-btn:not(:disabled):active {
+    transform: scale(0.98);
 }
 
 /* ---------- Search and sorting ---------- */
@@ -337,6 +366,7 @@ select:focus-visible {
     align-items: center;
     gap: 10px;
     flex: 1;
+    transition: border-color 0.15s, box-shadow 0.15s;
 }
 
 .search-box span {
@@ -356,6 +386,7 @@ select:focus-visible {
 
 .search-box:focus-within {
     border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(99, 91, 255, 0.12);
 }
 
 .toolbar select {
@@ -381,6 +412,7 @@ select:focus-visible {
     border: none;
     border-bottom: 2px solid transparent;
     font-size: 13px;
+    transition: color 0.15s, border-color 0.15s;
 }
 
 .filter:hover,
@@ -397,6 +429,7 @@ select:focus-visible {
 
 .task-list {
     list-style: none;
+    outline: none;
 }
 
 .task-item {
@@ -405,6 +438,12 @@ select:focus-visible {
     gap: 12px;
     padding: 18px 4px;
     border-bottom: 1px solid var(--border);
+    animation: fadeIn 0.22s ease;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-3px); }
+    to   { opacity: 1; transform: none; }
 }
 
 .task-item input[type="checkbox"] {
@@ -448,20 +487,9 @@ select:focus-visible {
     font-weight: 700;
 }
 
-.priority-high {
-    color: #d33d50;
-    background: #ffe8eb;
-}
-
-.priority-medium {
-    color: #a66a08;
-    background: #fff1d5;
-}
-
-.priority-low {
-    color: #16805b;
-    background: #ddf7eb;
-}
+.priority-high   { color: #d33d50; background: #ffe8eb; }
+.priority-medium { color: #a66a08; background: #fff1d5; }
+.priority-low    { color: #16805b; background: #ddf7eb; }
 
 .due-date {
     color: var(--muted);
@@ -506,23 +534,16 @@ body.dark .priority-low {
     padding: 8px;
     border-radius: 6px;
     font-size: 12px;
+    transition: background 0.15s;
 }
 
-.edit-btn {
-    color: var(--primary);
-}
+.edit-btn   { color: var(--primary); }
+.delete-btn { color: var(--danger); }
 
-.delete-btn {
-    color: var(--danger);
-}
+.edit-btn:hover   { background: var(--soft); }
+.delete-btn:hover { background: #fff0f1; }
 
-.edit-btn:hover {
-    background: var(--soft);
-}
-
-.delete-btn:hover {
-    background: #fff0f1;
-}
+body.dark .delete-btn:hover { background: #3a2129; }
 
 /* ---------- Empty state and footer ---------- */
 
@@ -567,7 +588,7 @@ body.dark .priority-low {
     font-size: 12px;
 }
 
-.clear-btn:hover {
+.clear-btn:not(:disabled):hover {
     text-decoration: underline;
 }
 
@@ -576,6 +597,80 @@ footer {
     color: var(--muted);
     font-size: 12px;
     margin-top: 30px;
+}
+
+/* ---------- Disabled states ---------- */
+
+button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: grayscale(0.25);
+}
+
+/* ---------- Toasts (undo, feedback) ---------- */
+
+.toast-container {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 8px;
+    z-index: 1000;
+    pointer-events: none;
+    width: max-content;
+    max-width: min(92vw, 440px);
+}
+
+.toast {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 16px;
+    background: var(--toast-bg);
+    color: var(--toast-text);
+    border-radius: 10px;
+    box-shadow: 0 12px 40px rgba(20, 22, 40, 0.28);
+    font-size: 13px;
+    line-height: 1.4;
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 0.22s ease, transform 0.22s ease;
+    pointer-events: auto;
+}
+
+.toast.show {
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.toast.leaving {
+    opacity: 0;
+    transform: translateY(12px);
+}
+
+.toast-message {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.toast-action {
+    background: transparent;
+    border: none;
+    color: var(--toast-action);
+    font-weight: 800;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: background 0.15s;
+}
+
+.toast-action:hover {
+    background: rgba(255, 255, 255, 0.08);
 }
 
 /* ---------- Responsive design ---------- */
@@ -648,5 +743,15 @@ footer {
 
     .task-actions {
         flex-direction: column;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
     }
 }

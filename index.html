@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6,11 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#635bff">
     <title>TaskFlow | Smart Task Manager</title>
-
     <link rel="stylesheet" href="css/style.css">
     <script src="js/script.js" defer></script>
 </head>
 <body>
+    <!-- Apply saved theme before first paint to avoid flash -->
+    <script>
+        try {
+            if (localStorage.getItem("taskflow-theme") === "dark") {
+                document.body.classList.add("dark");
+            }
+        } catch (_) { /* ignore */ }
+    </script>
+
     <header class="navbar">
         <a href="#" class="logo">TaskFlow<span>.</span></a>
 
@@ -125,7 +132,7 @@
                 <div class="search-box">
                     <span aria-hidden="true">⌕</span>
                     <input id="searchInput" type="search"
-                           placeholder="Search tasks..."
+                           placeholder="Search tasks…  (⌘K)"
                            aria-label="Search tasks">
                 </div>
 
@@ -149,7 +156,7 @@
                         aria-pressed="false">Overdue</button>
             </div>
 
-            <ul id="taskList" class="task-list"></ul>
+            <ul id="taskList" class="task-list" tabindex="-1"></ul>
 
             <div id="emptyMessage" class="empty-message">
                 <div class="empty-icon">✦</div>
@@ -169,5 +176,11 @@
             TaskFlow · Built for a more productive day.
         </footer>
     </main>
+
+    <!-- Toast container for undo / feedback -->
+    <div id="toastContainer"
+         class="toast-container"
+         aria-live="polite"
+         aria-atomic="false"></div>
 </body>
 </html>
