@@ -9,24 +9,20 @@
     <script src="js/script.js" defer></script>
 </head>
 <body>
-    <!-- Apply saved theme before first paint to avoid flash -->
     <script>
         try {
             if (localStorage.getItem("taskflow-theme") === "dark") {
                 document.body.classList.add("dark");
             }
-        } catch (_) { /* ignore */ }
+        } catch (_) {}
     </script>
 
     <header class="navbar">
         <a href="#" class="logo">TaskFlow<span>.</span></a>
-
         <div class="nav-actions">
             <span class="workspace-label">MY WORKSPACE</span>
             <button id="themeToggle" class="icon-btn"
-                    aria-label="Switch theme" title="Switch theme">
-                🌙
-            </button>
+                    aria-label="Switch theme" title="Switch theme">🌙</button>
         </div>
     </header>
 
@@ -43,19 +39,16 @@
                 <h2 id="totalCount">0</h2>
                 <small>All your tasks</small>
             </article>
-
             <article class="stat-card">
                 <span>Completed</span>
                 <h2 id="completedCount">0</h2>
                 <small>Tasks finished</small>
             </article>
-
             <article class="stat-card">
                 <span>Remaining</span>
                 <h2 id="remainingCount">0</h2>
                 <small>Still to do</small>
             </article>
-
             <article class="stat-card">
                 <span>Overdue</span>
                 <h2 id="overdueCount">0</h2>
@@ -71,13 +64,10 @@
                 </div>
                 <strong id="progressPercent">0%</strong>
             </div>
-
             <div class="progress-track"
                  role="progressbar"
                  aria-label="Task completion progress"
-                 aria-valuemin="0"
-                 aria-valuemax="100"
-                 aria-valuenow="0"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
                  id="progressTrack">
                 <div id="progressBar" class="progress-bar"></div>
             </div>
@@ -90,9 +80,27 @@
                     <p>Organize your work in one place.</p>
                 </div>
 
-                <button id="completeAll" class="secondary-btn">
-                    Complete all
-                </button>
+                <div class="heading-actions">
+                    <button id="completeAll" class="secondary-btn">
+                        Complete all
+                    </button>
+
+                    <details class="menu" id="moreMenu">
+                        <summary class="icon-btn" aria-label="More actions"
+                                 title="More actions">⋯</summary>
+                        <div class="menu-panel" role="menu">
+                            <button id="exportBtn" role="menuitem">
+                                Export as JSON
+                            </button>
+                            <button id="importBtn" role="menuitem">
+                                Import from JSON…
+                            </button>
+                            <hr>
+                            <button id="clearAllBtn" role="menuitem"
+                                    class="danger">Clear all tasks…</button>
+                        </div>
+                    </details>
+                </div>
             </div>
 
             <form id="taskForm" class="task-form">
@@ -117,16 +125,47 @@
                     <input id="dueDateInput" type="date">
                 </div>
 
+                <div class="field">
+                    <label for="tagsInput">Tags</label>
+                    <input id="tagsInput" type="text"
+                           placeholder="home, errand"
+                           maxlength="120" autocomplete="off">
+                </div>
+
+                <div class="field">
+                    <label for="recurrenceInput">Repeat</label>
+                    <select id="recurrenceInput">
+                        <option value="none" selected>Never</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                </div>
+
                 <div class="form-actions">
                     <button type="submit" id="submitBtn" class="add-btn">
                         + Add task
                     </button>
                     <button type="button" id="cancelEdit"
-                            class="secondary-btn" hidden>
-                        Cancel
-                    </button>
+                            class="secondary-btn" hidden>Cancel</button>
                 </div>
             </form>
+
+            <div id="bulkBar" class="bulk-bar" hidden>
+                <span><strong id="bulkCount">0</strong> selected</span>
+                <div class="bulk-actions">
+                    <button type="button" id="bulkComplete">Complete</button>
+                    <button type="button" id="bulkUncomplete">Uncomplete</button>
+                    <select id="bulkPriority" aria-label="Set priority">
+                        <option value="">Set priority…</option>
+                        <option value="high">High</option>
+                        <option value="medium">Medium</option>
+                        <option value="low">Low</option>
+                    </select>
+                    <button type="button" id="bulkDelete" class="danger">Delete</button>
+                    <button type="button" id="bulkClear" class="ghost">Clear</button>
+                </div>
+            </div>
 
             <div class="toolbar">
                 <div class="search-box">
@@ -135,8 +174,8 @@
                            placeholder="Search tasks…  (⌘K)"
                            aria-label="Search tasks">
                 </div>
-
                 <select id="sortSelect" aria-label="Sort tasks">
+                    <option value="manual">Manual order</option>
                     <option value="newest">Newest first</option>
                     <option value="oldest">Oldest first</option>
                     <option value="priority">Highest priority</option>
@@ -156,6 +195,8 @@
                         aria-pressed="false">Overdue</button>
             </div>
 
+            <div id="tagFilters" class="tag-filters" hidden></div>
+
             <ul id="taskList" class="task-list" tabindex="-1"></ul>
 
             <div id="emptyMessage" class="empty-message">
@@ -172,15 +213,32 @@
             </div>
         </section>
 
-        <footer>
-            TaskFlow · Built for a more productive day.
-        </footer>
+        <footer>TaskFlow · Built for a more productive day.</footer>
     </main>
 
-    <!-- Toast container for undo / feedback -->
-    <div id="toastContainer"
-         class="toast-container"
-         aria-live="polite"
-         aria-atomic="false"></div>
+    <div id="toastContainer" class="toast-container"
+         aria-live="polite" aria-atomic="false"></div>
+
+    <dialog id="importDialog" class="modal">
+        <form method="dialog">
+            <h3>Import tasks</h3>
+            <p>Choose how the imported tasks should be applied.</p>
+            <label class="radio">
+                <input type="radio" name="importMode" value="merge" checked>
+                <span><strong>Merge</strong> — keep existing tasks, add new ones</span>
+            </label>
+            <label class="radio">
+                <input type="radio" name="importMode" value="replace">
+                <span><strong>Replace</strong> — wipe current tasks first</span>
+            </label>
+            <div class="modal-actions">
+                <button value="cancel" class="secondary-btn">Cancel</button>
+                <button value="confirm" class="add-btn">Choose file…</button>
+            </div>
+        </form>
+    </dialog>
+
+    <input id="importFile" type="file"
+           accept="application/json,.json" hidden>
 </body>
 </html>

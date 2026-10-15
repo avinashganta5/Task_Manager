@@ -2,28 +2,44 @@
    TaskFlow — task manager
    ========================================================== */
 
-const $ = (selector) => document.querySelector(selector);
-const $$ = (selector) => document.querySelectorAll(selector);
+const $  = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
 
-const taskForm       = $("#taskForm");
-const taskInput      = $("#taskInput");
-const priorityInput  = $("#priorityInput");
-const dueDateInput   = $("#dueDateInput");
-const taskList       = $("#taskList");
-const emptyMessage   = $("#emptyMessage");
-const searchInput    = $("#searchInput");
-const sortSelect     = $("#sortSelect");
-const toastContainer = $("#toastContainer");
+const taskForm        = $("#taskForm");
+const taskInput       = $("#taskInput");
+const priorityInput   = $("#priorityInput");
+const dueDateInput    = $("#dueDateInput");
+const tagsInput       = $("#tagsInput");
+const recurrenceInput = $("#recurrenceInput");
+const taskList        = $("#taskList");
+const emptyMessage    = $("#emptyMessage");
+const searchInput     = $("#searchInput");
+const sortSelect      = $("#sortSelect");
+const toastContainer  = $("#toastContainer");
+const bulkBar         = $("#bulkBar");
+const tagFilters      = $("#tagFilters");
 
-const FILTERS = ["all", "active", "completed", "overdue"];
-const PRIORITIES = ["low", "medium", "high"];
-const PRIORITY_RANK = { high: 3, medium: 2, low: 1 };
-const DUE_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const FILTERS        = ["all", "active", "completed", "overdue"];
+const PRIORITIES     = ["low", "medium", "high"];
+const RECURRENCES    = ["none", "daily", "weekly", "monthly"];
+const PRIORITY_RANK  = { high: 3, medium: 2, low: 1 };
+const DUE_DATE_RE    = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_SUBTASKS   = 50;
+const MAX_TAGS       = 10;
+const MAX_NOTES      = 4000;
 
 let tasks = [];
 let currentFilter = "all";
+let currentTag = null;
 let editingId = null;
 let storageWarned = false;
+
+const expandedIds = new Set();   // task ids with details open
+const selectedIds = new Set();   // task ids selected for bulk ops
+let lastSelectedId = null;
+
+let dragSrcId = null;
+
 const prevStatValues = { total: null, completed: null, remaining: null, overdue: null };
 
 /* ==========================================================
@@ -34,17 +50,44 @@ function createId() {
     if (typeof crypto !== "undefined" && crypto.randomUUID) {
         return crypto.randomUUID();
     }
-    // Fallback for non-secure contexts
     return `t-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-// Local (not UTC) YYYY-MM-DD — avoids the "overdue at 11pm" bug.
 function todayString() {
     const d = new Date();
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
+}
+
+function addDays(dateString, days) {
+    const [y, m, d] = dateString.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    dt.setDate(dt.getDate() + days);
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
+function addMonths(dateString, months) {
+    const [y, m, d] = dateString.split("-").map(Number);
+    const dt = new Date(y, m - 1, d);
+    const day = dt.getDate();
+    dt.setDate(1);
+    dt.setMonth(dt.getMonth() + months);
+    // Clamp to last day of month
+    const lastDay = new Date(dt.getFullYear(), dt.getMonth() + 1, 0).getDate();
+    dt.setDate(Math.min(day, lastDay));
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
+function nextDueDate(dateString, recurrence) {
+    const base = dateString || todayString();
+    switch (recurrence) {
+        case "daily":   return addDays(base, 1);
+        case "weekly":  return addDays(base, 7);
+        case "monthly": return addMonths(base, 1);
+        default:        return base;
+    }
 }
 
 function isOverdue(task) {
@@ -67,9 +110,36 @@ function pluralize(n, word) {
     return `${n} ${word}${n === 1 ? "" : "s"}`;
 }
 
+function parseTags(raw) {
+    if (!raw || typeof raw !== "string") return [];
+    const seen = new Set();
+    const out = [];
+    raw.split(/[,\s]+/).forEach(part => {
+        const t = part.replace(/^#+/, "").trim().toLowerCase();
+        if (!t || t.length > 24) return;
+        if (seen.has(t)) return;
+        seen.add(t);
+        out.push(t);
+    });
+    return out.slice(0, MAX_TAGS);
+}
+
+function autoResize(textarea) {
+    textarea.style.height = "auto";
+    textarea.style.height = Math.min(textarea.scrollHeight, 260) + "px";
+}
+
 /* ==========================================================
    Persistence
    ========================================================== */
+
+function normalizeSubtask(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    const id = typeof raw.id === "string" && raw.id ? raw.id : createId();
+    const text = typeof raw.text === "string" ? raw.text.slice(0, 200) : "";
+    if (!text) return null;
+    return { id, text, done: Boolean(raw.done) };
+}
 
 function normalizeTask(raw) {
     if (!raw || typeof raw !== "object") return null;
@@ -82,8 +152,25 @@ function normalizeTask(raw) {
     if (dueDate !== "" && !DUE_DATE_RE.test(dueDate)) return null;
 
     const createdAt = Number.isFinite(raw.createdAt) ? raw.createdAt : Date.now();
+    const order     = Number.isFinite(raw.order) ? raw.order : createdAt;
 
-    return { id: raw.id, text: raw.text, priority: raw.priority, dueDate, completed: raw.completed, createdAt };
+    const subtasks = Array.isArray(raw.subtasks)
+        ? raw.subtasks.map(normalizeSubtask).filter(Boolean).slice(0, MAX_SUBTASKS)
+        : [];
+
+    return {
+        id: raw.id,
+        text: raw.text,
+        notes: typeof raw.notes === "string" ? raw.notes.slice(0, MAX_NOTES) : "",
+        priority: raw.priority,
+        dueDate,
+        completed: raw.completed,
+        createdAt,
+        order,
+        tags: parseTags(Array.isArray(raw.tags) ? raw.tags.join(" ") : String(raw.tags || "")),
+        recurrence: RECURRENCES.includes(raw.recurrence) ? raw.recurrence : "none",
+        subtasks
+    };
 }
 
 function normalizeTasks(list) {
@@ -115,7 +202,8 @@ function savePrefs() {
     try {
         localStorage.setItem("taskflow-prefs", JSON.stringify({
             filter: currentFilter,
-            sort: sortSelect.value
+            sort: sortSelect.value,
+            tag: currentTag
         }));
     } catch { /* non-critical */ }
 }
@@ -124,14 +212,20 @@ function loadPrefs() {
     try {
         const prefs = JSON.parse(localStorage.getItem("taskflow-prefs") || "{}");
         if (FILTERS.includes(prefs.filter)) currentFilter = prefs.filter;
+        if (typeof prefs.tag === "string" || prefs.tag === null) currentTag = prefs.tag;
         if (prefs.sort && sortSelect.querySelector(`option[value="${prefs.sort}"]`)) {
             sortSelect.value = prefs.sort;
         }
     } catch { /* use defaults */ }
 }
 
+function nextOrder() {
+    if (!tasks.length) return 0;
+    return Math.min(...tasks.map(t => t.order)) - 1;
+}
+
 /* ==========================================================
-   Toasts (with optional undo action)
+   Toasts
    ========================================================== */
 
 function showToast(message, { actionLabel, onAction, duration = 6000 } = {}) {
@@ -150,7 +244,7 @@ function showToast(message, { actionLabel, onAction, duration = 6000 } = {}) {
         clearTimeout(timer);
         toast.classList.add("leaving");
         toast.addEventListener("transitionend", () => toast.remove(), { once: true });
-        setTimeout(() => toast.remove(), 500); // fallback
+        setTimeout(() => toast.remove(), 500);
     }
 
     if (actionLabel && typeof onAction === "function") {
@@ -166,13 +260,11 @@ function showToast(message, { actionLabel, onAction, duration = 6000 } = {}) {
 
     toastContainer.appendChild(toast);
     requestAnimationFrame(() => toast.classList.add("show"));
-
     timer = setTimeout(dismiss, duration);
-    return dismiss;
 }
 
 /* ==========================================================
-   Dashboard statistics
+   Statistics
    ========================================================== */
 
 function updateStats() {
@@ -187,15 +279,13 @@ function updateStats() {
 
     $("#footerCount").textContent = `${pluralize(remaining, "task")} remaining`;
 
-    const percentage = tasks.length
-        ? Math.round((completed / tasks.length) * 100)
-        : 0;
-
+    const percentage = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
     $("#progressPercent").textContent = `${percentage}%`;
     $("#progressBar").style.width = `${percentage}%`;
     $("#progressTrack").setAttribute("aria-valuenow", String(percentage));
 
     updateBulkButtons();
+    updateBulkBar();
 }
 
 function setStat(selector, key, value) {
@@ -204,7 +294,7 @@ function setStat(selector, key, value) {
     el.textContent = value;
     if (prevStatValues[key] !== null) {
         el.classList.remove("pulse");
-        void el.offsetWidth; // force reflow to restart the animation
+        void el.offsetWidth;
         el.classList.add("pulse");
     }
     prevStatValues[key] = value;
@@ -213,6 +303,12 @@ function setStat(selector, key, value) {
 function updateBulkButtons() {
     $("#completeAll").disabled    = !tasks.some(t => !t.completed);
     $("#clearCompleted").disabled = !tasks.some(t => t.completed);
+}
+
+function updateBulkBar() {
+    const n = selectedIds.size;
+    bulkBar.hidden = n === 0;
+    if (n) $("#bulkCount").textContent = n;
 }
 
 /* ==========================================================
@@ -224,34 +320,74 @@ function createTaskElement(task) {
     item.className = "task-item";
     item.dataset.id = task.id;
     if (task.completed) item.classList.add("done");
+    if (selectedIds.has(task.id)) item.classList.add("selected");
 
-    /* Checkbox */
+    /* --- Bulk select checkbox --- */
+    const select = document.createElement("input");
+    select.type = "checkbox";
+    select.className = "task-select";
+    select.checked = selectedIds.has(task.id);
+    select.setAttribute("aria-label", `Select "${task.text}"`);
+    select.addEventListener("click", (e) => handleSelectClick(task, e));
+
+    /* --- Complete checkbox --- */
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
+    checkbox.className = "task-complete";
     checkbox.checked = task.completed;
     checkbox.setAttribute("aria-label",
         task.completed ? `Mark "${task.text}" as active` : `Mark "${task.text}" as complete`);
 
     checkbox.addEventListener("change", () => {
+        const wasCompleted = task.completed;
         task.completed = checkbox.checked;
+
+        if (!wasCompleted && task.completed && task.recurrence !== "none") {
+            spawnNextOccurrence(task);
+        }
+
         saveTasks();
         renderTasks();
 
-        // Restore focus to the same task's checkbox if it's still rendered.
         const restored = taskList.querySelector(
-            `[data-id="${CSS.escape(task.id)}"] input[type="checkbox"]`
+            `[data-id="${CSS.escape(task.id)}"] .task-complete`
         );
         (restored || taskList).focus();
     });
 
-    /* Content */
+    /* --- Content --- */
     const content = document.createElement("div");
     content.className = "task-content";
+
+    const head = document.createElement("div");
+    head.className = "task-head";
+
+    const hasDetails = task.notes || task.subtasks.length > 0;
+    const isOpen = expandedIds.has(task.id);
+
+    if (hasDetails) {
+        const expand = document.createElement("button");
+        expand.type = "button";
+        expand.className = "expand-btn" + (isOpen ? " open" : "");
+        expand.textContent = "▶";
+        expand.setAttribute("aria-expanded", String(isOpen));
+        expand.setAttribute("aria-label", isOpen ? "Collapse details" : "Expand details");
+        expand.addEventListener("click", () => {
+            if (isOpen) expandedIds.delete(task.id);
+            else expandedIds.add(task.id);
+            renderTasks();
+        });
+        head.appendChild(expand);
+    }
 
     const text = document.createElement("div");
     text.className = "task-text";
     text.textContent = task.text;
+    head.appendChild(text);
 
+    content.appendChild(head);
+
+    /* --- Meta --- */
     const meta = document.createElement("div");
     meta.className = "task-meta";
 
@@ -272,9 +408,43 @@ function createTaskElement(task) {
         meta.appendChild(due);
     }
 
-    content.append(text, meta);
+    if (task.recurrence !== "none") {
+        const rec = document.createElement("span");
+        rec.className = "recurrence";
+        rec.textContent = `↻ ${task.recurrence}`;
+        rec.title = `Repeats ${task.recurrence}`;
+        meta.appendChild(rec);
+    }
 
-    /* Actions */
+    if (task.subtasks.length) {
+        const done = task.subtasks.filter(s => s.done).length;
+        const chip = document.createElement("span");
+        chip.className = "subtask-progress" + (done === task.subtasks.length ? " complete" : "");
+        chip.textContent = `${done}/${task.subtasks.length} subtasks`;
+        meta.appendChild(chip);
+    }
+
+    task.tags.forEach(tag => {
+        const chip = document.createElement("span");
+        chip.className = "tag";
+        chip.textContent = `#${tag}`;
+        chip.title = `Filter by #${tag}`;
+        chip.addEventListener("click", () => {
+            currentTag = currentTag === tag ? null : tag;
+            savePrefs();
+            renderTasks();
+        });
+        meta.appendChild(chip);
+    });
+
+    content.appendChild(meta);
+
+    /* --- Expanded panel (notes + subtasks) --- */
+    if (isOpen) {
+        content.appendChild(buildExpandedPanel(task));
+    }
+
+    /* --- Actions --- */
     const actions = document.createElement("div");
     actions.className = "task-actions";
 
@@ -293,14 +463,315 @@ function createTaskElement(task) {
     deleteButton.addEventListener("click", () => deleteTask(task));
 
     actions.append(editButton, deleteButton);
-    item.append(checkbox, content, actions);
+    item.append(select, checkbox, content, actions);
+
+    /* --- Drag to reorder (only in manual mode) --- */
+    if (sortSelect.value === "manual") {
+        item.draggable = true;
+        attachDragHandlers(item, task);
+    }
 
     return item;
 }
 
 /* ==========================================================
+   Expanded panel: notes + subtasks
+   ========================================================== */
+
+function buildExpandedPanel(task) {
+    const wrap = document.createElement("div");
+    wrap.className = "task-expanded";
+
+    /* Notes */
+    const notesBlock = document.createElement("div");
+    const notesLabel = document.createElement("label");
+    notesLabel.textContent = "Notes";
+    const notesArea = document.createElement("textarea");
+    notesArea.className = "notes-area";
+    notesArea.placeholder = "Add details, links, context…";
+    notesArea.value = task.notes || "";
+    notesArea.rows = 2;
+    notesArea.addEventListener("input", () => {
+        task.notes = notesArea.value.slice(0, MAX_NOTES);
+        autoResize(notesArea);
+        debouncedSave();
+    });
+    notesBlock.append(notesLabel, notesArea);
+    wrap.appendChild(notesBlock);
+
+    /* Subtasks */
+    const subBlock = document.createElement("div");
+    const subLabel = document.createElement("label");
+    subLabel.textContent = `Subtasks${task.subtasks.length ? ` (${task.subtasks.length})` : ""}`;
+    subBlock.appendChild(subLabel);
+
+    const subList = document.createElement("ul");
+    subList.className = "subtask-list";
+
+    task.subtasks.forEach(sub => {
+        const li = document.createElement("li");
+        li.className = "subtask-item" + (sub.done ? " done" : "");
+
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.checked = sub.done;
+        cb.setAttribute("aria-label", `Toggle "${sub.text}"`);
+        cb.addEventListener("change", () => {
+            sub.done = cb.checked;
+            syncParentCompletion(task);
+            saveTasks();
+            renderTasks();
+        });
+
+        const span = document.createElement("span");
+        span.textContent = sub.text;
+
+        const del = document.createElement("button");
+        del.type = "button";
+        del.className = "subtask-delete";
+        del.textContent = "×";
+        del.setAttribute("aria-label", `Delete subtask "${sub.text}"`);
+        del.addEventListener("click", () => {
+            task.subtasks = task.subtasks.filter(s => s.id !== sub.id);
+            saveTasks();
+            renderTasks();
+        });
+
+        li.append(cb, span, del);
+        subList.appendChild(li);
+    });
+
+    const addRow = document.createElement("div");
+    addRow.className = "subtask-add";
+    const addInput = document.createElement("input");
+    addInput.type = "text";
+    addInput.placeholder = "Add a subtask and press Enter";
+    addInput.maxLength = 200;
+    addInput.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        const v = addInput.value.trim();
+        if (!v) return;
+        if (task.subtasks.length >= MAX_SUBTASKS) {
+            showToast(`Limit of ${MAX_SUBTASKS} subtasks reached.`);
+            return;
+        }
+        task.subtasks.push({ id: createId(), text: v.slice(0, 200), done: false });
+        addInput.value = "";
+        saveTasks();
+        renderTasks();
+        // Refocus the same task's add-input after re-render
+        const nextInput = taskList.querySelector(
+            `[data-id="${CSS.escape(task.id)}"] .subtask-add input`
+        );
+        nextInput?.focus();
+    });
+    addRow.appendChild(addInput);
+
+    subBlock.append(subList, addRow);
+    wrap.appendChild(subBlock);
+
+    // Resize any auto-grow textareas after mount
+    requestAnimationFrame(() => autoResize(notesArea));
+
+    return wrap;
+}
+
+function syncParentCompletion(task) {
+    if (!task.subtasks.length) return;
+    const allDone = task.subtasks.every(s => s.done);
+    task.completed = allDone;
+}
+
+/* ==========================================================
+   Drag to reorder
+   ========================================================== */
+
+function attachDragHandlers(item, task) {
+    item.addEventListener("dragstart", (e) => {
+        // Don't start drag from inside interactive elements
+        if (e.target.closest("input, textarea, button, select, a")) {
+            e.preventDefault();
+            return;
+        }
+        dragSrcId = task.id;
+        item.classList.add("dragging");
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", task.id);
+    });
+
+    item.addEventListener("dragend", () => {
+        dragSrcId = null;
+        $$(".task-item").forEach(el => {
+            el.classList.remove("dragging", "drag-over-top", "drag-over-bottom");
+        });
+    });
+
+    item.addEventListener("dragover", (e) => {
+        if (!dragSrcId || dragSrcId === task.id) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+
+        const rect = item.getBoundingClientRect();
+        const before = e.clientY < rect.top + rect.height / 2;
+
+        $$(".task-item").forEach(el => el.classList.remove("drag-over-top", "drag-over-bottom"));
+        item.classList.add(before ? "drag-over-top" : "drag-over-bottom");
+    });
+
+    item.addEventListener("dragleave", () => {
+        item.classList.remove("drag-over-top", "drag-over-bottom");
+    });
+
+    item.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (!dragSrcId || dragSrcId === task.id) return;
+
+        const rect = item.getBoundingClientRect();
+        const before = e.clientY < rect.top + rect.height / 2;
+
+        reorderTasks(dragSrcId, task.id, before);
+        dragSrcId = null;
+    });
+}
+
+function reorderTasks(sourceId, targetId, insertBefore) {
+    const visibleOrder = getVisibleTasks().map(t => t.id);
+    const from = visibleOrder.indexOf(sourceId);
+    let to = visibleOrder.indexOf(targetId);
+    if (from === -1 || to === -1) return;
+
+    visibleOrder.splice(from, 1);
+    to = visibleOrder.indexOf(targetId);
+    if (to === -1) to = visibleOrder.length;
+    visibleOrder.splice(insertBefore ? to : to + 1, 0, sourceId);
+
+    // Rewrite `order` by slotting the new visible sequence into the existing array,
+    // leaving hidden tasks (filtered out) exactly where they were.
+    const newSeq = visibleOrder.slice();
+    const visibleSet = new Set(newSeq);
+    const reordered = tasks.slice();
+
+    // Replace each visible slot with the next entry from newSeq
+    let cursor = 0;
+    for (let i = 0; i < reordered.length; i++) {
+        if (visibleSet.has(reordered[i].id)) {
+            reordered[i] = tasks.find(t => t.id === newSeq[cursor++]);
+        }
+    }
+
+    // Reassign sequential `order` values
+    reordered.forEach((t, i) => { t.order = i; });
+
+    tasks = reordered;
+
+    saveTasks();
+    renderTasks();
+    showToast("Order updated");
+}
+
+/* ==========================================================
+   Bulk selection
+   ========================================================== */
+
+function handleSelectClick(task, event) {
+    if (event.shiftKey && lastSelectedId) {
+        const visible = getVisibleTasks().map(t => t.id);
+        const a = visible.indexOf(lastSelectedId);
+        const b = visible.indexOf(task.id);
+        if (a !== -1 && b !== -1) {
+            const [from, to] = a < b ? [a, b] : [b, a];
+            for (let i = from; i <= to; i++) selectedIds.add(visible[i]);
+            updateBulkBar();
+            renderTasks();
+            return;
+        }
+    }
+
+    if (selectedIds.has(task.id)) {
+        selectedIds.delete(task.id);
+    } else {
+        selectedIds.add(task.id);
+        lastSelectedId = task.id;
+    }
+    updateBulkBar();
+    renderTasks();
+}
+
+function clearSelection() {
+    selectedIds.clear();
+    lastSelectedId = null;
+    updateBulkBar();
+    renderTasks();
+}
+
+function bulkApply(action, value) {
+    const targets = tasks.filter(t => selectedIds.has(t.id));
+    if (!targets.length) return;
+
+    switch (action) {
+        case "complete":
+            targets.forEach(t => { t.completed = true; });
+            showToast(`Completed ${pluralize(targets.length, "task")}`);
+            break;
+        case "uncomplete":
+            targets.forEach(t => { t.completed = false; });
+            showToast(`Reopened ${pluralize(targets.length, "task")}`);
+            break;
+        case "priority":
+            if (!PRIORITIES.includes(value)) return;
+            targets.forEach(t => { t.priority = value; });
+            showToast(`Set ${pluralize(targets.length, "task")} to ${value}`);
+            break;
+        case "delete": {
+            const removed = targets.slice();
+            tasks = tasks.filter(t => !selectedIds.has(t.id));
+            removed.forEach(r => {
+                if (editingId === r.id) resetForm();
+            });
+            showToast(`Deleted ${pluralize(removed.length, "task")}`, {
+                actionLabel: "Undo",
+                onAction: () => {
+                    tasks.push(...removed);
+                    saveTasks();
+                    renderTasks();
+                }
+            });
+            selectedIds.clear();
+            lastSelectedId = null;
+            break;
+        }
+    }
+
+    saveTasks();
+    renderTasks();
+}
+
+/* ==========================================================
    Task operations
    ========================================================== */
+
+function spawnNextOccurrence(task) {
+    const nextDate = task.dueDate
+        ? nextDueDate(task.dueDate, task.recurrence)
+        : nextDueDate(todayString(), task.recurrence);
+
+    tasks.push({
+        id: createId(),
+        text: task.text,
+        notes: task.notes,
+        priority: task.priority,
+        dueDate: nextDate,
+        completed: false,
+        createdAt: Date.now(),
+        order: nextOrder(),
+        tags: [...task.tags],
+        recurrence: task.recurrence,
+        subtasks: task.subtasks.map(s => ({ id: createId(), text: s.text, done: false }))
+    });
+
+    showToast(`Repeats ${task.recurrence} · next due ${formatDate(nextDate)}`);
+}
 
 function deleteTask(task) {
     const index = tasks.findIndex(t => t.id === task.id);
@@ -308,6 +779,8 @@ function deleteTask(task) {
 
     const [removed] = tasks.splice(index, 1);
     if (editingId === removed.id) resetForm();
+    selectedIds.delete(removed.id);
+    expandedIds.delete(removed.id);
 
     saveTasks();
     renderTasks();
@@ -326,9 +799,13 @@ function clearCompleted() {
     const removed = tasks.filter(t => t.completed);
     if (!removed.length) return;
 
-    tasks = tasks.filter(t => !t.completed);
-    if (editingId && !tasks.some(t => t.id === editingId)) resetForm();
+    removed.forEach(r => {
+        selectedIds.delete(r.id);
+        expandedIds.delete(r.id);
+        if (editingId === r.id) resetForm();
+    });
 
+    tasks = tasks.filter(t => !t.completed);
     saveTasks();
     renderTasks();
 
@@ -349,7 +826,6 @@ function completeAllVisible() {
     targets.forEach(t => { t.completed = true; });
     saveTasks();
     renderTasks();
-
     showToast(`Completed ${pluralize(targets.length, "task")}`);
 }
 
@@ -362,13 +838,20 @@ function getVisibleTasks() {
     const sort = sortSelect.value;
 
     const filtered = tasks.filter(task => {
-        const matchesSearch = !query || task.text.toLowerCase().includes(query);
+        const matchesSearch = !query
+            || task.text.toLowerCase().includes(query)
+            || task.notes.toLowerCase().includes(query)
+            || task.tags.some(t => t.includes(query));
+
         const matchesFilter =
             currentFilter === "all" ||
             (currentFilter === "active"    && !task.completed) ||
             (currentFilter === "completed" &&  task.completed) ||
             (currentFilter === "overdue"   && isOverdue(task));
-        return matchesSearch && matchesFilter;
+
+        const matchesTag = !currentTag || task.tags.includes(currentTag);
+
+        return matchesSearch && matchesFilter && matchesTag;
     });
 
     filtered.sort((a, b) => {
@@ -382,7 +865,8 @@ function getVisibleTasks() {
                 if (!b.dueDate) return -1;
                 return a.dueDate.localeCompare(b.dueDate) || (b.createdAt - a.createdAt);
             case "alphabetical": return a.text.localeCompare(b.text);
-            default:            return b.createdAt - a.createdAt; // newest
+            case "manual":       return a.order - b.order;
+            default:             return b.createdAt - a.createdAt;
         }
     });
 
@@ -401,16 +885,45 @@ function getEmptyCopy() {
     if (query) {
         return { icon: "⌕", title: "No matches", body: `Nothing matches "${truncate(query, 40)}".` };
     }
-    switch (currentFilter) {
-        case "overdue":
-            return { icon: "🎉", title: "Nothing overdue", body: "You're all caught up." };
-        case "completed":
-            return { icon: "◌", title: "Nothing completed yet", body: "Check off a task to see it here." };
-        case "active":
-            return { icon: "✓", title: "No active tasks", body: "Everything is done. Nice work." };
-        default:
-            return { icon: "✦", title: "No matching tasks", body: "Try another search or filter." };
+    if (currentTag) {
+        return { icon: "#", title: `No #${currentTag} tasks`, body: "Try a different tag or clear the filter." };
     }
+    switch (currentFilter) {
+        case "overdue":   return { icon: "🎉", title: "Nothing overdue", body: "You're all caught up." };
+        case "completed": return { icon: "◌", title: "Nothing completed yet", body: "Check off a task to see it here." };
+        case "active":    return { icon: "✓", title: "No active tasks", body: "Everything is done. Nice work." };
+        default:          return { icon: "✦", title: "No matching tasks", body: "Try another search or filter." };
+    }
+}
+
+function renderTagFilters() {
+    const allTags = new Set();
+    tasks.forEach(t => t.tags.forEach(tag => allTags.add(tag)));
+
+    if (!allTags.size) {
+        tagFilters.hidden = true;
+        tagFilters.replaceChildren();
+        if (currentTag) { currentTag = null; savePrefs(); }
+        return;
+    }
+
+    tagFilters.hidden = false;
+    tagFilters.replaceChildren();
+
+    const sorted = [...allTags].sort();
+    sorted.forEach(tag => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "tag-chip" + (currentTag === tag ? " active" : "");
+        btn.textContent = `#${tag}`;
+        btn.setAttribute("aria-pressed", String(currentTag === tag));
+        btn.addEventListener("click", () => {
+            currentTag = currentTag === tag ? null : tag;
+            savePrefs();
+            renderTasks();
+        });
+        tagFilters.appendChild(btn);
+    });
 }
 
 function renderTasks() {
@@ -428,6 +941,7 @@ function renderTasks() {
         emptyMessage.querySelector("p").textContent = body;
     }
 
+    renderTagFilters();
     updateStats();
 }
 
@@ -435,17 +949,22 @@ function renderTasks() {
    Add / edit tasks
    ========================================================== */
 
+let saveTimer = null;
+function debouncedSave() {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveTasks, 350);
+}
+
 taskForm.addEventListener("submit", (event) => {
     event.preventDefault();
 
     const text = taskInput.value.trim();
     const priority = priorityInput.value;
     const dueDate = dueDateInput.value;
+    const tags = parseTags(tagsInput.value);
+    const recurrence = recurrenceInput.value;
 
-    if (!text) {
-        taskInput.focus();
-        return;
-    }
+    if (!text) { taskInput.focus(); return; }
 
     if (dueDate && !DUE_DATE_RE.test(dueDate)) {
         showToast("Please select a valid due date.");
@@ -458,6 +977,8 @@ taskForm.addEventListener("submit", (event) => {
             task.text = text;
             task.priority = priority;
             task.dueDate = dueDate;
+            task.tags = tags;
+            task.recurrence = recurrence;
         }
         resetForm();
         saveTasks();
@@ -469,10 +990,15 @@ taskForm.addEventListener("submit", (event) => {
     tasks.push({
         id: createId(),
         text,
+        notes: "",
         priority,
         dueDate,
         completed: false,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        order: nextOrder(),
+        tags,
+        recurrence,
+        subtasks: []
     });
 
     resetForm();
@@ -486,6 +1012,8 @@ function startEditing(task) {
     taskInput.value = task.text;
     priorityInput.value = task.priority;
     dueDateInput.value = task.dueDate || "";
+    tagsInput.value = task.tags.join(", ");
+    recurrenceInput.value = task.recurrence;
 
     $("#submitBtn").textContent = "Save changes";
     $("#cancelEdit").hidden = false;
@@ -499,6 +1027,7 @@ function resetForm() {
     editingId = null;
     taskForm.reset();
     priorityInput.value = "medium";
+    recurrenceInput.value = "none";
     $("#submitBtn").textContent = "+ Add task";
     $("#cancelEdit").hidden = true;
 }
@@ -538,12 +1067,117 @@ sortSelect.addEventListener("change", () => {
 $("#completeAll").addEventListener("click", completeAllVisible);
 $("#clearCompleted").addEventListener("click", clearCompleted);
 
+/* Bulk bar */
+$("#bulkComplete").addEventListener("click", () => bulkApply("complete"));
+$("#bulkUncomplete").addEventListener("click", () => bulkApply("uncomplete"));
+$("#bulkDelete").addEventListener("click", () => bulkApply("delete"));
+$("#bulkClear").addEventListener("click", clearSelection);
+$("#bulkPriority").addEventListener("change", (e) => {
+    const value = e.target.value;
+    e.target.value = "";
+    if (!value) return;
+    bulkApply("priority", value);
+});
+
+/* Close overflow menu on outside click */
+document.addEventListener("click", (e) => {
+    const menu = $("#moreMenu");
+    if (menu.open && !menu.contains(e.target)) menu.open = false;
+});
+
+/* ==========================================================
+   Import / Export
+   ========================================================== */
+
+function exportTasks() {
+    const data = JSON.stringify({
+        version: 1,
+        exportedAt: new Date().toISOString(),
+        tasks
+    }, null, 2);
+
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `taskflow-backup-${todayString()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(`Exported ${pluralize(tasks.length, "task")}`);
+    $("#moreMenu").open = false;
+}
+
+$("#exportBtn").addEventListener("click", exportTasks);
+
+$("#importBtn").addEventListener("click", () => {
+    $("#moreMenu").open = false;
+    $("#importDialog").showModal();
+});
+
+$("#importDialog").addEventListener("close", () => {
+    if ($("#importDialog").returnValue !== "confirm") return;
+    $("#importFile").click();
+});
+
+$("#importFile").addEventListener("change", async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    const mode = document.querySelector('input[name="importMode"]:checked')?.value || "merge";
+
+    try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        const rawList = Array.isArray(parsed) ? parsed
+                       : Array.isArray(parsed?.tasks) ? parsed.tasks : null;
+        if (!rawList) throw new Error("Unrecognized file format");
+
+        const imported = normalizeTasks(rawList);
+        if (!imported.length) throw new Error("No valid tasks found in file");
+
+        if (mode === "replace") {
+            tasks = imported;
+            selectedIds.clear();
+            expandedIds.clear();
+            if (editingId) resetForm();
+        } else {
+            const existing = new Set(tasks.map(t => t.id));
+            const fresh = imported.filter(t => !existing.has(t.id));
+            // Reassign order so imports land at the top of manual order
+            let start = nextOrder() - fresh.length;
+            fresh.forEach(t => { t.order = start++; });
+            tasks.push(...fresh);
+        }
+
+        saveTasks();
+        renderTasks();
+        showToast(`Imported ${pluralize(imported.length, "task")} (${mode})`);
+    } catch (err) {
+        showToast("Import failed: " + err.message);
+    }
+});
+
+$("#clearAllBtn").addEventListener("click", () => {
+    $("#moreMenu").open = false;
+    if (!tasks.length) return;
+    if (!confirm(`Delete all ${pluralize(tasks.length, "task")}? This cannot be undone.`)) return;
+    tasks = [];
+    selectedIds.clear();
+    expandedIds.clear();
+    resetForm();
+    saveTasks();
+    renderTasks();
+    showToast("All tasks cleared");
+});
+
 /* ==========================================================
    Keyboard shortcuts
    ========================================================== */
 
 document.addEventListener("keydown", (event) => {
-    // ⌘K / Ctrl+K — focus search
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         searchInput.focus();
@@ -552,6 +1186,7 @@ document.addEventListener("keydown", (event) => {
     }
 
     if (event.key === "Escape") {
+        if ($("#importDialog").open) return; // dialog handles its own Escape
         if (editingId) {
             resetForm();
             taskInput.focus();
@@ -574,13 +1209,9 @@ const themeMeta = document.querySelector('meta[name="theme-color"]');
 function applyTheme(dark) {
     document.body.classList.toggle("dark", dark);
     themeToggle.textContent = dark ? "☀️" : "🌙";
-    themeToggle.setAttribute(
-        "aria-label",
-        dark ? "Switch to light mode" : "Switch to dark mode"
-    );
-    if (themeMeta) {
-        themeMeta.setAttribute("content", dark ? "#1c1e2a" : "#635bff");
-    }
+    themeToggle.setAttribute("aria-label",
+        dark ? "Switch to light mode" : "Switch to dark mode");
+    if (themeMeta) themeMeta.setAttribute("content", dark ? "#1c1e2a" : "#635bff");
     try {
         localStorage.setItem("taskflow-theme", dark ? "dark" : "light");
     } catch { /* session-only */ }
@@ -621,14 +1252,14 @@ window.addEventListener("storage", (event) => {
 (function init() {
     applyTheme(getInitialTheme());
     loadPrefs();
-    tasks = loadTasks();
 
-    // Sync the visible filter button to `currentFilter` (may have come from prefs).
+    // Sync visible filter buttons with `currentFilter` (from prefs)
     $$(".filter").forEach(btn => {
         const active = btn.dataset.filter === currentFilter;
         btn.classList.toggle("active", active);
         btn.setAttribute("aria-pressed", String(active));
     });
 
+    tasks = loadTasks();
     renderTasks();
 })();
