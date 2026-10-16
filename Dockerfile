@@ -1,4 +1,4 @@
-# BAse Image
+# Base Image for nginx
 FROM nginx:alpine
 
 # Copy your local static files into the default Nginx directory
