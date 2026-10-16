@@ -11,7 +11,7 @@ pipeline {
             steps {
                 echo 'Running system checks...'
                 // Simulating a random failure. Change to 'true' to simulate a success.
-                sh 'exit 1' 
+                sh 'pwd' 
             }
         }
     }
