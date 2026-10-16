@@ -1,4 +1,4 @@
-# Base Image for nginx
+# Base Image for nginx it is light alpine
 FROM nginx:alpine
 
 # Copy your local static files into the default Nginx directory
